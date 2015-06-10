@@ -21,38 +21,17 @@
 #include "ESP8266.h"
 #include <avr/pgmspace.h>
 
-#define LOG_OUTPUT_DEBUG            (1)
-#define LOG_OUTPUT_DEBUG_PREFIX     (1)
-
-#define logDebug(arg)\
-    do {\
-        if (LOG_OUTPUT_DEBUG)\
-        {\
-            if (LOG_OUTPUT_DEBUG_PREFIX)\
-            {\
-                Serial.print("[LOG Debug: ");\
-                Serial.print((const char*)__FILE__);\
-                Serial.print(",");\
-                Serial.print((unsigned int)__LINE__);\
-                Serial.print(",");\
-                Serial.print((const char*)__FUNCTION__);\
-                Serial.print("] ");\
-            }\
-            Serial.print(arg);\
-        }\
-    } while(0)
-
 #ifdef ESP8266_USE_SOFTWARE_SERIAL
-ESP8266::ESP8266(SoftwareSerial &uart, uint32_t baud): m_puart(&uart)
+ESP8266::ESP8266(SoftwareSerial &uart): m_puart(&uart)
 {
-    m_puart->begin(baud);
-    rx_empty();
+    m_onData = NULL;
+    m_onDataPtr = NULL;
 }
 #else
-ESP8266::ESP8266(HardwareSerial &uart, uint32_t baud): m_puart(&uart)
+ESP8266::ESP8266(HardwareSerial &uart): m_puart(&uart)
 {
-    m_puart->begin(baud);
-    rx_empty();
+    m_onData = NULL;
+    m_onDataPtr = NULL;
 }
 #endif
 
@@ -414,56 +393,26 @@ bool ESP8266::send(uint8_t mux_id, const uint8_t *buffer, uint32_t len)
     return sATCIPSENDMultiple(mux_id, buffer, len);
 }
 
-uint32_t ESP8266::recv(uint8_t *buffer, uint32_t buffer_size, uint32_t timeout)
+void ESP8266::run()
 {
-    return recvPkg(buffer, buffer_size, NULL, timeout, NULL);
-}
-
-uint32_t ESP8266::recv(uint8_t mux_id, uint8_t *buffer, uint32_t buffer_size, uint32_t timeout)
-{
-    uint8_t id;
-    uint32_t ret;
-    ret = recvPkg(buffer, buffer_size, NULL, timeout, &id);
-    if (ret > 0 && id == mux_id) {
-        return ret;
-    }
-    return 0;
-}
-
-uint32_t ESP8266::recv(uint8_t *coming_mux_id, uint8_t *buffer, uint32_t buffer_size, uint32_t timeout)
-{
-    return recvPkg(buffer, buffer_size, NULL, timeout, coming_mux_id);
+    rx_empty();
 }
 
 /*----------------------------------------------------------------------------*/
 /* +IPD,<id>,<len>:<data> */
 /* +IPD,<len>:<data> */
 
-uint32_t ESP8266::recvPkg(uint8_t *buffer, uint32_t buffer_size, uint32_t *data_len, uint32_t timeout, uint8_t *coming_mux_id)
+uint32_t ESP8266::checkIPD(String& data)
 {
-    String data;
-    char a;
+    //Serial.print("### check: ");
+    //Serial.println(data);
+
     int32_t index_PIPDcomma = -1;
     int32_t index_colon = -1; /* : */
     int32_t index_comma = -1; /* , */
     int32_t len = -1;
     int8_t id = -1;
-    bool has_data = false;
-    uint32_t ret;
-    unsigned long start;
-    uint32_t i;
-    
-    if (buffer == NULL) {
-        return 0;
-    }
-    
-    start = millis();
-    while (millis() - start < timeout) {
-        if(m_puart->available() > 0) {
-            a = m_puart->read();
-            data += a;
-        }
-        
+    { // Just for easier diffing
         index_PIPDcomma = data.indexOf("+IPD,");
         if (index_PIPDcomma != -1) {
             index_colon = data.indexOf(':', index_PIPDcomma + 5);
@@ -485,30 +434,10 @@ uint32_t ESP8266::recvPkg(uint8_t *buffer, uint32_t buffer_size, uint32_t *data_
                         return 0;
                     }
                 }
-                has_data = true;
-                break;
-            }
-        }
-    }
-    
-    if (has_data) {
-        i = 0;
-        ret = len > buffer_size ? buffer_size : len;
-        start = millis();
-        while (millis() - start < 3000) {
-            while(m_puart->available() > 0 && i < ret) {
-                a = m_puart->read();
-                buffer[i++] = a;
-            }
-            if (i == ret) {
-                rx_empty();
-                if (data_len) {
-                    *data_len = len;    
+                if (m_onData) {
+                    m_onData(id, len, m_onDataPtr);
                 }
-                if (index_comma != -1 && coming_mux_id) {
-                    *coming_mux_id = id;
-                }
-                return ret;
+                return len;
             }
         }
     }
@@ -517,8 +446,19 @@ uint32_t ESP8266::recvPkg(uint8_t *buffer, uint32_t buffer_size, uint32_t *data_
 
 void ESP8266::rx_empty(void) 
 {
-    while(m_puart->available() > 0) {
-        m_puart->read();
+    String data;
+    char a;
+    unsigned long start = millis();
+    while (millis() - start < 10) {
+        if (m_puart->available()) {
+            a = m_puart->read();
+            if(a == '\0') continue;
+            data += a;
+            if (checkIPD(data)) {
+                data = "";
+            }
+            start = millis();
+        }
     }
 }
 
@@ -530,12 +470,14 @@ String ESP8266::recvString(String target, uint32_t timeout)
     while (millis() - start < timeout) {
         while(m_puart->available() > 0) {
             a = m_puart->read();
-			if(a == '\0') continue;
+            if(a == '\0') continue;
             data += a;
+            if (data.indexOf(target) != -1) {
+                return data;
+            } else if (checkIPD(data)) {
+                data = "";
+            }
         }
-        if (data.indexOf(target) != -1) {
-            break;
-        }   
     }
     
     return data;
@@ -549,13 +491,15 @@ String ESP8266::recvString(String target1, String target2, uint32_t timeout)
     while (millis() - start < timeout) {
         while(m_puart->available() > 0) {
             a = m_puart->read();
-			if(a == '\0') continue;
+            if(a == '\0') continue;
             data += a;
-        }
-        if (data.indexOf(target1) != -1) {
-            break;
-        } else if (data.indexOf(target2) != -1) {
-            break;
+            if (data.indexOf(target1) != -1) {
+                return data;
+            } else if (data.indexOf(target2) != -1) {
+                return data;
+            } else if (checkIPD(data)) {
+                data = "";
+            }
         }
     }
     return data;
@@ -569,15 +513,18 @@ String ESP8266::recvString(String target1, String target2, String target3, uint3
     while (millis() - start < timeout) {
         while(m_puart->available() > 0) {
             a = m_puart->read();
-			if(a == '\0') continue;
+            if(a == '\0') continue;
             data += a;
-        }
-        if (data.indexOf(target1) != -1) {
-            break;
-        } else if (data.indexOf(target2) != -1) {
-            break;
-        } else if (data.indexOf(target3) != -1) {
-            break;
+            
+            if (data.indexOf(target1) != -1) {
+                return data;
+            } else if (data.indexOf(target2) != -1) {
+                return data;
+            } else if (data.indexOf(target3) != -1) {
+                return data;
+            } else if (checkIPD(data)) {
+                data = "";
+            }
         }
     }
     return data;

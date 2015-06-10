@@ -37,7 +37,7 @@
  * You can modify the macro to choose a different version
  */
 
-#define  USER_SEL_VERSION         VERSION_18
+#define  USER_SEL_VERSION         VERSION_22
 
 /**
  * Provide an easy-to-use way to manipulate ESP8266. 
@@ -45,39 +45,40 @@
 class ESP8266 {
  public:
 
+    typedef void (*onData)(uint8_t mux_id, uint32_t len, void* ptr);
+
 #ifdef ESP8266_USE_SOFTWARE_SERIAL
     /*
      * Constuctor. 
      *
      * @param uart - an reference of SoftwareSerial object. 
-     * @param baud - the buad rate to communicate with ESP8266(default:9600). 
-     *
      * @warning parameter baud depends on the AT firmware. 9600 is an common value. 
      */
-#if (USER_SEL_VERSION == VERSION_22)
-    ESP8266(SoftwareSerial &uart, uint32_t baud = 115200);
-#elif (USER_SEL_VERSION == VERSION_18)
-    ESP8266(SoftwareSerial &uart, uint32_t baud = 9600);
-#endif  /* #if(USER_SEL_VERSION==VERSION_22) */
+
+    ESP8266(SoftwareSerial &uart);
+    
+    SoftwareSerial* getUart() { return m_puart; }
 
 #else /* HardwareSerial */
     /*
      * Constuctor. 
      *
      * @param uart - an reference of HardwareSerial object. 
-     * @param baud - the buad rate to communicate with ESP8266(default:9600). 
-     *
      * @warning parameter baud depends on the AT firmware. 9600 is an common value. 
      */
-#if (USER_SEL_VERSION == VERSION_22)
-    ESP8266(HardwareSerial &uart, uint32_t baud = 115200);
-#elif (USER_SEL_VERSION == VERSION_18)
-    ESP8266(HardwareSerial &uart, uint32_t baud = 9600);
-#endif /* #if(USER_SEL_VERSION == VERSION_22) */
 
+    ESP8266(HardwareSerial &uart);
+    
+    HardwareSerial* getUart() { return m_puart; }
 
 #endif /* #ifdef ESP8266_USE_SOFTWARE_SERIAL */
+
+    void setOnData(onData cbk, void* ptr) {
+        m_onData = cbk;
+        m_onDataPtr = ptr;
+    }
     
+    void run();
     
     /** 
      * Verify ESP8266 whether live or not. 
@@ -590,41 +591,6 @@ class ESP8266 {
      * @retval false - failure.
      */
     bool sendFromFlash(uint8_t mux_id, const uint8_t *buffer, uint32_t len);
-    
-    /**
-     * Receive data from TCP or UDP builded already in single mode. 
-     *
-     * @param buffer - the buffer for storing data. 
-     * @param buffer_size - the length of the buffer. 
-     * @param timeout - the time waiting data. 
-     * @return the length of data received actually. 
-     */
-    uint32_t recv(uint8_t *buffer, uint32_t buffer_size, uint32_t timeout = 1000);
-    
-    /**
-     * Receive data from one of TCP or UDP builded already in multiple mode. 
-     *
-     * @param mux_id - the identifier of this TCP(available value: 0 - 4). 
-     * @param buffer - the buffer for storing data. 
-     * @param buffer_size - the length of the buffer. 
-     * @param timeout - the time waiting data. 
-     * @return the length of data received actually. 
-     */
-    uint32_t recv(uint8_t mux_id, uint8_t *buffer, uint32_t buffer_size, uint32_t timeout = 1000);
-    
-    /**
-     * Receive data from all of TCP or UDP builded already in multiple mode. 
-     *
-     * After return, coming_mux_id store the id of TCP or UDP from which data coming. 
-     * User should read the value of coming_mux_id and decide what next to do. 
-     * 
-     * @param coming_mux_id - the identifier of TCP or UDP. 
-     * @param buffer - the buffer for storing data. 
-     * @param buffer_size - the length of the buffer. 
-     * @param timeout - the time waiting data. 
-     * @return the length of data received actually. 
-     */
-    uint32_t recv(uint8_t *coming_mux_id, uint8_t *buffer, uint32_t buffer_size, uint32_t timeout = 1000);
 
  private:
 
@@ -668,7 +634,7 @@ class ESP8266 {
      * @param timeout - the duration waitting data comming.
      * @param coming_mux_id - in single connection mode, should be NULL and not NULL in multiple. 
      */
-    uint32_t recvPkg(uint8_t *buffer, uint32_t buffer_size, uint32_t *data_len, uint32_t timeout, uint8_t *coming_mux_id);
+    uint32_t checkIPD(String& data);
     
     
     bool eAT(void);
@@ -729,6 +695,8 @@ class ESP8266 {
 #else
     HardwareSerial *m_puart; /* The UART to communicate with ESP8266 */
 #endif
+    onData m_onData;
+    void*  m_onDataPtr;
 };
 
 #endif /* #ifndef __ESP8266_H__ */
