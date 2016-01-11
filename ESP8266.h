@@ -23,11 +23,8 @@
 
 #include "Arduino.h"
 
-//#define ESP8266_USE_SOFTWARE_SERIAL
+#include "Stream.h"
 
-#ifdef ESP8266_USE_SOFTWARE_SERIAL
-#include "SoftwareSerial.h"
-#endif
 
 #define  VERSION_18   		0X18
 #define  VERSION_22   		0X22
@@ -47,7 +44,6 @@ class ESP8266 {
 
     typedef void (*onData)(uint8_t mux_id, uint32_t len, void* ptr);
 
-#ifdef ESP8266_USE_SOFTWARE_SERIAL
     /*
      * Constuctor. 
      *
@@ -55,23 +51,10 @@ class ESP8266 {
      * @warning parameter baud depends on the AT firmware. 9600 is an common value. 
      */
 
-    ESP8266(SoftwareSerial &uart);
+    ESP8266(Stream &uart);
     
-    SoftwareSerial* getUart() { return m_puart; }
+    Stream* getUart() { return m_puart; }
 
-#else /* HardwareSerial */
-    /*
-     * Constuctor. 
-     *
-     * @param uart - an reference of HardwareSerial object. 
-     * @warning parameter baud depends on the AT firmware. 9600 is an common value. 
-     */
-
-    ESP8266(HardwareSerial &uart);
-    
-    HardwareSerial* getUart() { return m_puart; }
-
-#endif /* #ifdef ESP8266_USE_SOFTWARE_SERIAL */
 
     void setOnData(onData cbk, void* ptr) {
         m_onData = cbk;
@@ -142,7 +125,7 @@ class ESP8266 {
      * @param baudrate - the uart baudrate. 
      * @retval true - success. 
      * @retval false - failure. 
-     * @note  Only allows baud rate design, for the other parameters:databits- 8,stopbits -1,parity -0,flow control -0 . 
+     * @note  warn : you must call begin after changing baudrate. Only allows baud rate design, for the other parameters:databits- 8,stopbits -1,parity -0,flow control -0 .
      */
     bool setUart(uint32_t baudrate,uint8_t pattern);
     
@@ -690,11 +673,8 @@ class ESP8266 {
      * +IPD,id,len:data
      */
     
-#ifdef ESP8266_USE_SOFTWARE_SERIAL
-    SoftwareSerial *m_puart; /* The UART to communicate with ESP8266 */
-#else
-    HardwareSerial *m_puart; /* The UART to communicate with ESP8266 */
-#endif
+    Stream *m_puart; /* The UART to communicate with ESP8266 */
+
     onData m_onData;
     void*  m_onDataPtr;
 };
